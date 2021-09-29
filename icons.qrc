@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/new/icons">
+        <file>Icons/LedBlue.png</file>
+        <file>Icons/LedGray.png</file>
+        <file>Icons/LedGreen.png</file>
+        <file>Icons/LedRed.png</file>
+        <file>Icons/LedYellow.png</file>
+    </qresource>
+</RCC>
