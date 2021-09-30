@@ -26,7 +26,7 @@ Dialog::Dialog(QWidget *parent)
     }
 
     connect(&m_serial, &QSerialPort::readyRead, this, &Dialog::readData);
-
+// Just for test
 
 }
 
