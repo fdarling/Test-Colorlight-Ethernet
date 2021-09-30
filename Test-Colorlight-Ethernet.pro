@@ -14,6 +14,7 @@ SOURCES += \
     dialog.cpp
 
 HEADERS += \
+    MDIO_UART.h \
     dialog.h
 
 FORMS += \
