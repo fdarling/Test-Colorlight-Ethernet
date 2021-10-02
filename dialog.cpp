@@ -3,6 +3,10 @@
 #include <QSettings>
 #include <QSerialPortInfo>
 #include <QThread>
+#include "iphlpapi.h"
+#include <Ntddndis.h>
+#include "Packet32.h"
+#include <QMessageBox>
 
 Dialog::Dialog(QWidget *parent)
     : QDialog(parent)
@@ -27,7 +31,45 @@ Dialog::Dialog(QWidget *parent)
     }
 
     connect(&m_serial, &QSerialPort::readyRead, this, &Dialog::readData);
-// Just for test
+
+
+    QStringList horzHeaders;
+    horzHeaders << "Human Name" << "System Name";
+
+    ui->m_listEthCardNames->setColumnCount(2);
+    ui->m_listEthCardNames->setHorizontalHeaderLabels( horzHeaders );
+    ui->m_listEthCardNames->horizontalHeader()->setSectionResizeMode(0,QHeaderView::ResizeToContents);
+    ui->m_listEthCardNames->horizontalHeader()->setSectionResizeMode(1,QHeaderView::Stretch);
+
+    settings.beginGroup( "DefaultCards" );
+    QString defaultSource = settings.value("Source",QVariant("Nothing")).toString();
+    QString defaultDestination = settings.value("Destination",QVariant("Nothing")).toString();
+    settings.endGroup();
+
+    pcap_if_t *alldevs;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    if (pcap_findalldevs(&alldevs, errbuf) != -1)
+    {
+
+        int i = 0;
+        for(pcap_if_t *d = alldevs; d != NULL; d = d->next)
+        {
+            ui->m_listEthCardNames->insertRow(i);
+            QTableWidgetItem* newItem = new QTableWidgetItem (d->description);
+            ui->m_listEthCardNames->setItem(i,0,newItem);
+
+            newItem = new QTableWidgetItem (d->name);
+            ui->m_listEthCardNames->setItem(i,1,newItem);
+            if (newItem->text()==defaultSource)
+            {
+                ui->m_listEthCardNames->selectRow(i);
+            }
+
+            i += 1;
+        }
+        pcap_freealldevs(alldevs);
+    }
+
 
 }
 
@@ -45,7 +87,16 @@ void Dialog::FillCheckBoxesChannel0()
     ui->m_cbTx0_100F->setChecked((reg04 & (1<<8)) != 0);
     uint32_t reg00 = ReadMDIORegister(0,0);
     ui->m_cbAutoNeg_0->setChecked((reg00 & (1<<12)) != 0);
-    ui->m_cb100M_0->setChecked((reg00 & (1<<13)) != 0);
+    int speed = 0;
+    if (reg00 & (1<<13))
+    {
+        speed |= 1;
+    }
+    if (reg00 & (1<<6))
+    {
+        speed |= 2;
+    }
+    ui->m_comboSpeed_0->setCurrentIndex(speed);
     ui->m_cbFullDuplex_0->setChecked((reg00 & (1<<8)) != 0);
 /*    uint32_t reg19 = ReadMDIORegister(0,0x19);
     ui->m_cbCrossCable_0->setChecked((reg19 & (1<<14)) != 0);
@@ -59,7 +110,7 @@ uint32_t Dialog::ReadMDIORegister(int nPhy, int nReg)
     s.cmd = MDIO_CMD_READ;
     s.phyAddr = nPhy;
     s.regAddr = nReg;
-    s.reserved = 0;
+    s.reserved = ui->m_comboSpeed_0->currentIndex();
     s.data = 0;
 
     // Flush all UART Data
@@ -67,7 +118,7 @@ uint32_t Dialog::ReadMDIORegister(int nPhy, int nReg)
     m_serial.clear(QSerialPort::Input);
 
     // Switch receiver mode
-    m_rcvBehaviour = rcvBhReadMdioRegisterPhy0;
+    m_rcvBehaviour = rcvBhNoNeedReaction;
     // Send command
     m_serial.write((char*)&s,sizeof(s));
 
@@ -81,6 +132,25 @@ uint32_t Dialog::ReadMDIORegister(int nPhy, int nReg)
     return m_receivedData[0] + m_receivedData[1] * 0x100;
 }
 
+void Dialog::WriteMDIORegister(int nPhy, int nReg, uint32_t data)
+{
+    MdioUartStruct s;
+    s.cmd = MDIO_CMD_WRITE;
+    s.phyAddr = nPhy;
+    s.regAddr = nReg;
+    s.reserved = ui->m_comboSpeed_0->currentIndex();
+    s.data = data;
+
+    // Flush all UART Data
+    m_receivedPtr = 0;
+    m_serial.clear(QSerialPort::Input);
+
+    // Switch receiver mode
+    m_rcvBehaviour = rcvBhNoNeedReaction;
+    // Send command
+    m_serial.write((char*)&s,sizeof(s));
+
+}
 
 void Dialog::on_m_btnOpenUART_clicked()
 {
@@ -251,5 +321,319 @@ void Dialog::on_m_btnWriteRegMDIO1_clicked()
 
 void Dialog::on_m_reset_phy_0_clicked()
 {
+}
+
+
+void Dialog::on_m_btnUpdateUi_0_clicked()
+{
     FillCheckBoxesChannel0();
+
+    uint32_t reg1 = ReadMDIORegister(0,0x01);
+    if (reg1 & (1<<2))
+    {
+        ui->m_ledLink_0->setPixmap(QPixmap(":/new/icons/Icons/LedGreen.png"));
+    } else
+    {
+        ui->m_ledLink_0->setPixmap(QPixmap(":/new/icons/Icons/LedGray.png"));
+
+    }
+
+}
+
+void Dialog::on_m_cbTx0_100F_clicked()
+{
+    static const int shift = 8;
+    uint32_t reg04 = ReadMDIORegister(0,4);
+    if (ui->m_cbTx0_100F->isChecked())
+    {
+        reg04 |= (1<<shift);
+    } else
+    {
+        reg04 &= ~(1<<shift);
+    }
+    WriteMDIORegister(0,4,reg04);
+
+}
+
+void Dialog::on_m_cbTx0_100H_clicked()
+{
+    static const int shift = 7;
+    uint32_t reg04 = ReadMDIORegister(0,4);
+    if (ui->m_cbTx0_100H->isChecked())
+    {
+        reg04 |= (1<<shift);
+    } else
+    {
+        reg04 &= ~(1<<shift);
+    }
+    WriteMDIORegister(0,4,reg04);
+
+}
+
+void Dialog::on_m_cbTx0_10F_clicked()
+{
+    static const int shift = 6;
+    uint32_t reg04 = ReadMDIORegister(0,4);
+    if (ui->m_cbTx0_10F->isChecked())
+    {
+        reg04 |= (1<<shift);
+    } else
+    {
+        reg04 &= ~(1<<shift);
+    }
+    WriteMDIORegister(0,4,reg04);
+
+}
+
+void Dialog::on_m_cbTx0_10H_clicked()
+{
+    static const int shift = 5;
+    uint32_t reg04 = ReadMDIORegister(0,4);
+    if (ui->m_cbTx0_10H->isChecked())
+    {
+        reg04 |= (1<<shift);
+    } else
+    {
+        reg04 &= ~(1<<shift);
+    }
+    WriteMDIORegister(0,4,reg04);
+
+}
+
+void Dialog::on_m_cbAutoNeg_0_clicked()
+{
+    static const int shift = 12;
+    uint32_t reg00 = ReadMDIORegister(0,0);
+    if (ui->m_cbAutoNeg_0->isChecked())
+    {
+        reg00 |= (1<<shift);
+    } else
+    {
+        reg00 &= ~(1<<shift);
+    }
+    WriteMDIORegister(0,0,reg00);
+
+}
+
+
+void Dialog::on_m_cbFullDuplex_0_clicked()
+{
+    static const int shift = 8;
+    uint32_t reg00 = ReadMDIORegister(0,0);
+    if (ui->m_cbFullDuplex_0->isChecked())
+    {
+        reg00 |= (1<<shift);
+    } else
+    {
+        reg00 &= ~(1<<shift);
+    }
+    WriteMDIORegister(0,0,reg00);
+
+}
+
+void Dialog::on_m_comboSpeed_0_currentIndexChanged(int index)
+{
+    uint32_t reg00 = ReadMDIORegister(0,0);
+
+    if (index & 1)
+    {
+        reg00 |= (1<<13);
+    } else
+    {
+        reg00 &= ~(1<<13);
+    }
+    if (index &2)
+    {
+        reg00 |= (1<<6);
+    } else
+    {
+        reg00 &= ~(1<<6);
+    }
+    WriteMDIORegister(0,0,reg00);
+}
+
+void Dialog::on_m_btnOpenEthCard_clicked()
+{
+    int srcRow = ui->m_listEthCardNames->currentRow();
+    if (srcRow <0)
+    {
+        QMessageBox::critical(this,"Error","Please, select a Source Card");
+        return;
+    }
+
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+
+    QString srcDescription = ui->m_listEthCardNames->item(srcRow,0)->text();
+    QTableWidgetItem* srcItem =  ui->m_listEthCardNames->item(srcRow,1);
+    m_hCardSource = pcap_open_live(srcItem->text().toLatin1(), 65536, 1, -1, errbuf);
+    if (m_hCardSource == 0)
+    {
+        QMessageBox::critical(this,"Open Source Adapter Error",errbuf);
+        return;
+    }
+
+
+    PPACKET_OID_DATA pOidData;
+    CHAR pAddr[512];
+
+
+
+    ZeroMemory(pAddr, sizeof(pAddr));
+    pOidData = (PPACKET_OID_DATA) pAddr;
+    pOidData->Oid = OID_802_3_CURRENT_ADDRESS;
+    pOidData->Length = 6;
+    LPADAPTER  pADP = PacketOpenAdapter((PCHAR)(srcItem->text().toLatin1().constData()));
+    if(PacketRequest(pADP, FALSE, pOidData))
+    {
+        memcpy(m_macSource, pOidData->Data, 6);
+    }
+
+    PacketCloseAdapter(pADP);
+
+    QSettings settings( "YolkaPlay.conf", QSettings::IniFormat );
+    settings.beginGroup( "DefaultCards" );
+    settings.setValue( "Source", srcItem->text() );
+    settings.endGroup();
+
+    ui->m_listEthCardNames->setEnabled(false);
+    ui->m_btnCloseEthCard->setEnabled(true);
+    ui->m_btnOpenEthCard->setEnabled(false);
+}
+
+void Dialog::on_m_btnCloseEthCard_clicked()
+{
+    pcap_close (m_hCardSource);
+    m_hCardSource = 0;
+
+
+    ui->m_btnCloseEthCard->setEnabled(false);
+    ui->m_btnOpenEthCard->setEnabled(true);
+    ui->m_listEthCardNames->setEnabled(true);
+
+}
+
+void Dialog::on_m_btnSendPkt_clicked()
+{
+    addrAndPort sourceParams;
+    sourceParams.mac = m_macSource;
+    sourceParams.ip = inet_addr("10.0.0.2");
+    sourceParams.port = 12345;
+
+    static const uint8_t fakeDestMac [6]={0x01,0x02,0x03,0x04,0x05,0x06};
+
+    addrAndPort destParams;
+    destParams.mac = (uint8_t*) fakeDestMac;
+    destParams.ip = inet_addr("10.0.0.3");
+    destParams.port = 12345;
+
+    static const int dataSize = 0x10;
+    udpData udpData;
+    udpData.SetUserSize(dataSize);
+    for (int i=0;i<dataSize;i++)
+    {
+        udpData.m_pUserData[i] = (uint8_t)i;
+    }
+
+    // Well. Data is filled, now we can add extra information
+    CreatePacket(sourceParams,destParams,udpData);
+
+    pcap_sendpacket(m_hCardSource,udpData.m_pData,udpData.m_totalDataSize);
+
+
+}
+void Dialog::CreatePacket( addrAndPort& source,
+                           addrAndPort& destination,
+                           udpData& packet)
+{
+    USHORT TotalLen = packet.m_userSize + 20 + 8; // IP Header uses length of data plus length of ip header (usually 20 bytes) plus lenght of udp header (usually 8)
+    //Beginning of Ethernet II Header
+    memcpy((void*)packet.m_pData,(void*)destination.mac,6);
+    memcpy((void*)(packet.m_pData+6),(void*)source.mac,6);
+    USHORT TmpType = 8;
+    memcpy((void*)(packet.m_pData+12),(void*)&TmpType,2); //The type of protocol used. (USHORT) Type 0x08 is UDP. You can change this for other protocols (e.g. TCP)
+    // Beginning of IP Header
+    memcpy((void*)(packet.m_pData+14),(void*)"\x45",1); //The Version (4) in the first 3 bits  and the header length on the last 5. (Im not sure, if someone could correct me plz do)
+                                                     //If you wanna do any IPv6 stuff, you will need to change this. but i still don't know how to do ipv6 myself =s
+    memcpy((void*)(packet.m_pData+15),(void*)"\x00",1); //Differntiated services field. Usually 0
+    TmpType = htons(TotalLen);
+    memcpy((void*)(packet.m_pData+16),(void*)&TmpType,2);
+    TmpType = htons(0x1337);
+    memcpy((void*)(packet.m_pData+18),(void*)&TmpType,2);// Identification. Usually not needed to be anything specific, esp in udp. 2 bytes (Here it is 0x1337
+    memcpy((void*)(packet.m_pData+20),(void*)"\x00",1); // Flags. These are not usually used in UDP either, more used in TCP for fragmentation and syn acks i think
+    memcpy((void*)(packet.m_pData+21),(void*)"\x00",1); // Offset
+    memcpy((void*)(packet.m_pData+22),(void*)"\x80",1); // Time to live. Determines the amount of time the packet can spend trying to get to the other computer. (I see 128 used often for this)
+    memcpy((void*)(packet.m_pData+23),(void*)"\x11",1);// Protocol. UDP is 0x11 (17) TCP is 6 ICMP is 1 etc
+    memcpy((void*)(packet.m_pData+24),(void*)"\x00\x00",2); //checksum
+    memcpy((void*)(packet.m_pData+26),(void*)&source.ip,4); //inet_addr does htonl() for us
+    memcpy((void*)(packet.m_pData+30),(void*)&destination.ip,4);
+    //Beginning of UDP Header
+    TmpType = htons(source.port);
+    memcpy((void*)(packet.m_pData+34),(void*)&TmpType,2);
+    TmpType = htons(destination.port);
+    memcpy((void*)(packet.m_pData+36),(void*)&TmpType,2);
+    USHORT UDPTotalLen = htons(packet.m_userSize + 8); // UDP Length does not include length of IP header
+    memcpy((void*)(packet.m_pData+38),(void*)&UDPTotalLen,2);
+    //memcpy((void*)(FinalPacket+40),(void*)&TmpType,2); //checksum
+//Already    memcpy((void*)(packet.m_pData+42),(void*)UserData,UserDataLen);
+
+    unsigned short UDPChecksum = CalculateUDPChecksum(packet);
+    memcpy((void*)(packet.m_pData+40),(void*)&UDPChecksum,2);
+
+    unsigned short IPChecksum = htons(CalculateIPChecksum(packet/*,TotalLen,0x1337,source.ip,destination.ip*/));
+    memcpy((void*)(packet.m_pData+24),(void*)&IPChecksum,2);
+
+    return;
+
+}
+
+unsigned short Dialog::CalculateUDPChecksum(udpData& packet)
+{
+    unsigned short CheckSum = 0;
+    unsigned short PseudoLength = packet.m_userSize + 8 + 9; //Length of PseudoHeader = Data Length + 8 bytes UDP header (2Bytes Length,2 Bytes Dst Port, 2 Bytes Src Port, 2 Bytes Checksum)
+                                                        //+ Two 4 byte IP's + 1 byte protocol
+    PseudoLength += PseudoLength % 2; //If bytes are not an even number, add an extra.
+    unsigned short Length = packet.m_userSize + 8; // This is just UDP + Data length. needed for actual data in udp header
+
+    unsigned char* PseudoHeader = new unsigned char [PseudoLength];
+    for(int i = 0;i < PseudoLength;i++){PseudoHeader[i] = 0x00;}
+
+    PseudoHeader[0] = 0x11;
+
+    memcpy((void*)(PseudoHeader+1),(void*)(packet.m_pData+26),8); // Source and Dest IP
+
+    Length = htons(Length);
+    memcpy((void*)(PseudoHeader+9),(void*)&Length,2);
+    memcpy((void*)(PseudoHeader+11),(void*)&Length,2);
+
+    memcpy((void*)(PseudoHeader+13),(void*)(packet.m_pData+34),2);
+    memcpy((void*)(PseudoHeader+15),(void*)(packet.m_pData+36),2);
+
+    memcpy((void*)(PseudoHeader+17),(void*)packet.m_pUserData,packet.m_userSize);
+
+
+    for(int i = 0;i < PseudoLength;i+=2)
+    {
+        unsigned short Tmp = BytesTo16(PseudoHeader[i],PseudoHeader[i+1]);
+        unsigned short Difference = 65535 - CheckSum;
+        CheckSum += Tmp;
+        if(Tmp > Difference){CheckSum += 1;}
+    }
+    CheckSum = ~CheckSum; //One's complement
+    return CheckSum;
+
+}
+
+unsigned short Dialog::CalculateIPChecksum(Dialog::udpData &packet/*, UINT TotalLen, UINT ID, UINT SourceIP, UINT DestIP*/)
+{
+    unsigned short CheckSum = 0;
+    for(int i = 14;i<34;i+=2)
+    {
+        unsigned short Tmp = BytesTo16(packet.m_pData[i],packet.m_pData[i+1]);
+        unsigned short Difference = 65535 - CheckSum;
+        CheckSum += Tmp;
+        if(Tmp > Difference){CheckSum += 1;}
+    }
+    CheckSum = ~CheckSum;
+    return CheckSum;
 }

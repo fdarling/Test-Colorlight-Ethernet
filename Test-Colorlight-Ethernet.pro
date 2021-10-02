@@ -8,6 +8,14 @@ CONFIG += c++11
 # You can make your code fail to compile if it uses deprecated APIs.
 # In order to do so, uncomment the following line.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
+DEFINES += HAVE_SNPRINTF
+DEFINES += HAVE_VSNPRINTF
+INCLUDEPATH += WinPCap/Include
+LIBS += $$PWD/WinPCap/Lib/x64/wpcap.lib
+LIBS += $$PWD/WinPCap/Lib/x64/Packet.lib
+LIBS += -lIphlpapi
+LIBS += -lWs2_32
+
 
 SOURCES += \
     main.cpp \
