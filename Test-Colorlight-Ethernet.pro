@@ -18,11 +18,13 @@ LIBS += -lWs2_32
 
 
 SOURCES += \
+    crc32.cpp \
     main.cpp \
     dialog.cpp
 
 HEADERS += \
     MDIO_UART.h \
+    crc32.h \
     dialog.h
 
 FORMS += \

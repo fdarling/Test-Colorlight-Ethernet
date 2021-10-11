@@ -69,6 +69,8 @@ Dialog::Dialog(QWidget *parent)
         }
         pcap_freealldevs(alldevs);
     }
+    m_nSendPktCnt = 0;
+    m_dataForSend = 0;
 
 
 }
@@ -76,6 +78,10 @@ Dialog::Dialog(QWidget *parent)
 Dialog::~Dialog()
 {
     delete ui;
+    if (m_dataForSend != 0)
+    {
+        delete[] m_dataForSend;
+    }
 }
 
 void Dialog::FillCheckBoxesChannel0()
@@ -527,12 +533,12 @@ void Dialog::on_m_btnSendPkt_clicked()
     destParams.ip = inet_addr("10.0.0.3");
     destParams.port = 12345;
 
-    static const int dataSize = 0x10;
+    static const int dataSize = 0x22;
     udpData udpData;
     udpData.SetUserSize(dataSize);
     for (int i=0;i<dataSize;i++)
     {
-        udpData.m_pUserData[i] = (uint8_t)i;
+        udpData.m_pUserData[i] = (uint8_t)(i + ((~i)<<4));
     }
 
     // Well. Data is filled, now we can add extra information
@@ -582,6 +588,14 @@ void Dialog::CreatePacket( addrAndPort& source,
 
     unsigned short IPChecksum = htons(CalculateIPChecksum(packet/*,TotalLen,0x1337,source.ip,destination.ip*/));
     memcpy((void*)(packet.m_pData+24),(void*)&IPChecksum,2);
+
+//    memset (packet.m_pData,0,packet.m_totalDataSize);
+
+//    uint32_t crc = CalculateCRC(packet.m_pData,packet.m_totalDataSize);
+/*    packet.m_pData[packet.m_totalDataSize-4] = (uint8_t)(crc/0x1);
+    packet.m_pData[packet.m_totalDataSize-3] = (uint8_t)(crc/0x100);
+    packet.m_pData[packet.m_totalDataSize-2] = (uint8_t)(crc/0x10000);
+    packet.m_pData[packet.m_totalDataSize-1] = (uint8_t)(crc/0x1000000);*/
 
     return;
 
@@ -636,4 +650,188 @@ unsigned short Dialog::CalculateIPChecksum(Dialog::udpData &packet/*, UINT Total
     }
     CheckSum = ~CheckSum;
     return CheckSum;
+}
+uint32_t Dialog::CalculateCRC(uint8_t* pData,int size)
+{
+
+    int i, j;
+    unsigned int byte, crc, mask;
+
+    i = 0;
+    crc = 0xFFFFFFFF;
+    while (i < size) {
+       byte = pData[i];            // Get next byte.
+       crc = crc ^ byte;
+       for (j = 7; j >= 0; j--) {    // Do eight times.
+          mask = -(crc & 1);
+          crc = (crc >> 1) ^ (0xEDB88320 & mask);
+       }
+       i = i + 1;
+    }
+    return ~crc;
+/*
+    const uint8_t crcBitsInByte = 8;
+    const uint32_t CrcMSBit = 1ul << (sizeof(uint32_t) * crcBitsInByte - 1);
+    const uint32_t CrcPoly = 0x04C11DB7;
+    uint32_t sum = 0xffffffff;
+    uint32_t length = size;
+    auto pdata = pData;
+    for (uint32_t i = 0; i < length; i++)
+    {
+        sum ^= pdata[i];
+        for (uint8_t bit = 0; bit < crcBitsInByte; bit++)
+        {
+            if ((sum & CrcMSBit) == CrcMSBit)
+                sum = (sum << 1) ^ CrcPoly;
+            else
+                sum <<= 1;
+        }
+    }
+    return sum;*/
+}
+
+
+void CReceiverThread::run()
+{
+    while (!isInterruptionRequested())
+    {
+        pcap_pkthdr *header;
+        const u_char * pData;
+        int res = pcap_next_ex(m_pDialog->m_hCardSource, &header, &pData);
+        if (res == 1)
+        {
+            if (header->len != header->caplen)
+            {
+                volatile int stop = 0;
+                (void) stop;
+            }
+            receivedPacket* pPkt = new receivedPacket(header->len);
+            m_pDialog->m_receivedPackets.push_back(pPkt);
+            pPkt->SetTimeStamp(m_pDialog->m_timer.nsecsElapsed());
+            memcpy (pPkt->GetHdrPtr(),header,sizeof(pcap_pkthdr));
+            memcpy (pPkt->GetData(),pData,header->caplen);
+        }
+    }
+}
+
+void Dialog::on_pushButton_clicked()
+{
+    // Clear results of previous
+    for (auto i = m_receivedPackets.begin();i!=m_receivedPackets.end();++i)
+    {
+//        (*i)->clear();
+        delete (*i);
+    }
+    m_receivedPackets.clear();
+
+    m_rcvThread.m_pDialog = this;
+    m_rcvThread.start(QThread::HighestPriority);
+
+
+    // These parameters will be same for all packets
+    for (size_t i=0;i<sizeof(m_macSource);i++)
+    {
+        m_macDestination[i] = ~m_macSource[i];
+    }
+
+    addrAndPort sourceParams;
+    sourceParams.mac = m_macSource;
+    sourceParams.ip = inet_addr("10.0.0.2");
+    sourceParams.port = 12345;
+
+    addrAndPort destParams;
+    destParams.mac = m_macDestination;
+    destParams.ip = inet_addr("10.0.0.3");
+    destParams.port = 12345;
+
+
+    // Create Packets for send
+    m_nSendPktCnt =ui->m_loopsCnt->text().toUInt();
+    if ((m_nSendPktCnt <= 0) || (m_nSendPktCnt>1000000))
+    {
+        QMessageBox::critical(this,"Error","Wrong Loops Counter");
+        return;
+    }
+    if (m_dataForSend != 0)
+    {
+        delete[] m_dataForSend;
+    }
+    m_dataForSend = new udpData [m_nSendPktCnt];
+
+    // We need repeatable process that is why
+    // using same seed for tests
+    srand (1234);
+
+    // Create all packets for send.
+    for (int i=0;i<m_nSendPktCnt;i++)
+    {
+        int len;
+        do
+        {
+            len = rand()%1024;
+//            len = 0x12;
+        } while ((len<=8)||(len%4!=2));
+
+        m_dataForSend[i].SetUserSize(len);
+
+        // Fill Random data
+        for (int j=m_dataForSend[i].GetUserSize()-1;j>=0;j--)
+        {
+            m_dataForSend[i].m_pUserData[j] = (uint8_t)rand();
+//            m_dataForSend[i].m_pUserData[j] = j;
+        }
+        CreatePacket(sourceParams,destParams,m_dataForSend[i]);
+    }
+
+    // OK. Now we are ready to send data...
+    m_timer.start();
+
+    for (int i=0;i<m_nSendPktCnt;i++)
+    {
+//        m_testResults[i].timeStartSend = m_timer.nsecsElapsed();
+//        m_testResults[i].sendResult = pcap_sendpacket(m_hCardSource,m_udpData[i].m_pData,m_udpData[i].m_totalDataSize);
+//        m_testResults[i].timeEndSend = m_timer.nsecsElapsed();
+//        QThread::msleep(delayTime);
+
+        pcap_sendpacket(m_hCardSource,m_dataForSend[i].m_pData,m_dataForSend[i].m_totalDataSize);
+        QThread::msleep(1);
+    }
+
+    // For finish receive process
+    Sleep (1000);
+
+    if (m_rcvThread.isRunning())
+    {
+        m_rcvThread.requestInterruption();
+    }
+    while (m_rcvThread.isRunning())
+    {
+        QThread::msleep(10);
+    }
+
+    int nGood = 0;
+    for (int i=0;i<m_nSendPktCnt;i++)
+    {
+        for (int j=0;j<m_dataForSend[i].m_totalDataSize;j++)
+        {
+            m_dataForSend[i].m_pData[j] = ~m_dataForSend[i].m_pData[j];
+        }
+        for (auto j = m_receivedPackets.begin();j!=m_receivedPackets.end();++j)
+        {
+            receivedPacket* rcvPkt = *j;
+            if (m_dataForSend[i].m_totalDataSize == rcvPkt->GetSize())
+            {
+                if (memcmp(m_dataForSend[i].m_pData,rcvPkt->GetData(),rcvPkt->GetSize())==0)
+                {
+                    nGood +=1;
+                } else
+                {
+                    volatile uint8_t* ptr1 = m_dataForSend[i].m_pData;
+                    volatile uint8_t* ptr2 = rcvPkt->GetData();
+                    int stop = 0;
+                }
+            }
+        }
+    }
+    QMessageBox::information(this,"Info",QString("%1 packets totally, %2 of %3 are correct").arg(m_receivedPackets.size()).arg(nGood).arg(m_nSendPktCnt));
 }

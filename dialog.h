@@ -6,6 +6,69 @@
 #include "MDIO_UART.h"
 #include "pcap-int.h"
 #include "Packet32.h"
+#include <QThread>
+#include <QDebug>
+
+class Dialog;
+
+class receivedPacket
+{
+protected:
+    int m_len;
+    uint8_t* m_pData;
+    pcap_pkthdr m_hdr;
+    qint64 m_timeStamp;
+public:
+    receivedPacket(int len)
+    {
+        m_len = len;
+        m_pData = new uint8_t[len];
+    }
+    ~receivedPacket()
+    {
+        qDebug()<<"Destructor!";
+        if (m_pData != 0)
+        {
+            delete[] m_pData;
+        }
+    }
+    inline uint8_t* GetData()
+    {
+        return m_pData;
+    }
+    inline int GetSize()
+    {
+        return m_len;
+    }
+    void clear()
+    {
+        delete[] m_pData;
+        m_pData = 0;
+    }
+    inline pcap_pkthdr* GetHdrPtr ()
+    {
+        return &m_hdr;
+    }
+    inline qint64 GetTimeStamp()
+    {
+        return m_timeStamp;
+    }
+    inline void SetTimeStamp(qint64 timeStamp)
+    {
+        m_timeStamp = timeStamp;
+    }
+};
+
+class CReceiverThread : public QThread
+{
+public:
+    Dialog* m_pDialog;
+    // QThread interface
+protected:
+    void run();
+
+};
+
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class Dialog; }
@@ -18,13 +81,17 @@ class Dialog : public QDialog
 public:
     Dialog(QWidget *parent = nullptr);
     ~Dialog();
+    pcap_t* m_hCardSource;
+    QElapsedTimer m_timer;
 
 private:
     Ui::Dialog *ui;
 
 protected:
-    pcap_t* m_hCardSource;
+    virtual uint32_t CalculateCRC(uint8_t* pData,int size);
+
     uint8_t m_macSource[6];
+    uint8_t m_macDestination[6];
 
     struct addrAndPort
     {
@@ -62,6 +129,7 @@ protected:
             {
                 delete[] m_pData;
             }
+            // 42 bytes - header
             m_totalDataSize =userSizeInBytes + 42;
             m_pData = new uint8_t [m_totalDataSize];
 
@@ -74,6 +142,9 @@ protected:
         }
         inline int GetUserSize(){return m_userSize;}
     };
+
+    int m_nSendPktCnt;
+    udpData* m_dataForSend;
 
     unsigned short BytesTo16(unsigned char X,unsigned char Y)
     {
@@ -118,6 +189,13 @@ protected:
         rcvBhReadMdioRegisterPhy1,
         rcvBhNoNeedReaction
     } m_rcvBehaviour;
+
+    CReceiverThread m_rcvThread;
+
+public:
+    std::list <receivedPacket*> m_receivedPackets;
+
+
 private slots:
     void on_m_btnOpenUART_clicked();
     void readData();
@@ -139,5 +217,6 @@ private slots:
     void on_m_btnOpenEthCard_clicked();
     void on_m_btnCloseEthCard_clicked();
     void on_m_btnSendPkt_clicked();
+    void on_pushButton_clicked();
 };
 #endif // DIALOG_H
