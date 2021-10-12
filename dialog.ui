@@ -432,6 +432,9 @@
        </item>
        <item>
         <widget class="QPushButton" name="m_btnSendPkt">
+         <property name="enabled">
+          <bool>false</bool>
+         </property>
          <property name="text">
           <string>Send Pkt</string>
          </property>
@@ -439,6 +442,9 @@
        </item>
        <item>
         <widget class="QPushButton" name="pushButton">
+         <property name="enabled">
+          <bool>false</bool>
+         </property>
          <property name="text">
           <string>Loops</string>
          </property>
@@ -460,6 +466,13 @@
          </property>
          <property name="text">
           <string>1</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="m_btnExportBad">
+         <property name="text">
+          <string>Export Bad</string>
          </property>
         </widget>
        </item>

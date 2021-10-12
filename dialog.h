@@ -218,5 +218,6 @@ private slots:
     void on_m_btnCloseEthCard_clicked();
     void on_m_btnSendPkt_clicked();
     void on_pushButton_clicked();
+    void on_m_btnExportBad_clicked();
 };
 #endif // DIALOG_H

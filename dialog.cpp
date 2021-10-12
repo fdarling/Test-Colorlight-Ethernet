@@ -7,6 +7,8 @@
 #include <Ntddndis.h>
 #include "Packet32.h"
 #include <QMessageBox>
+#include <QFileDialog>
+#include <QFile>
 
 Dialog::Dialog(QWidget *parent)
     : QDialog(parent)
@@ -504,6 +506,8 @@ void Dialog::on_m_btnOpenEthCard_clicked()
 
     ui->m_listEthCardNames->setEnabled(false);
     ui->m_btnCloseEthCard->setEnabled(true);
+    ui->m_btnSendPkt->setEnabled(true);
+    ui->pushButton->setEnabled(true);
     ui->m_btnOpenEthCard->setEnabled(false);
 }
 
@@ -514,6 +518,8 @@ void Dialog::on_m_btnCloseEthCard_clicked()
 
 
     ui->m_btnCloseEthCard->setEnabled(false);
+    ui->m_btnSendPkt->setEnabled(false);
+    ui->pushButton->setEnabled(false);
     ui->m_btnOpenEthCard->setEnabled(true);
     ui->m_listEthCardNames->setEnabled(true);
 
@@ -770,7 +776,7 @@ void Dialog::on_pushButton_clicked()
         {
             len = rand()%1024;
 //            len = 0x12;
-        } while ((len<=8)||(len%4!=2));
+        } while ((len<=18)||(len%4!=2));
 
         m_dataForSend[i].SetUserSize(len);
 
@@ -794,7 +800,7 @@ void Dialog::on_pushButton_clicked()
 //        QThread::msleep(delayTime);
 
         pcap_sendpacket(m_hCardSource,m_dataForSend[i].m_pData,m_dataForSend[i].m_totalDataSize);
-        QThread::msleep(1);
+//        QThread::msleep(1);
     }
 
     // For finish receive process
@@ -810,6 +816,7 @@ void Dialog::on_pushButton_clicked()
     }
 
     int nGood = 0;
+    int totallyReceived = m_receivedPackets.size();
     for (int i=0;i<m_nSendPktCnt;i++)
     {
         for (int j=0;j<m_dataForSend[i].m_totalDataSize;j++)
@@ -823,15 +830,58 @@ void Dialog::on_pushButton_clicked()
             {
                 if (memcmp(m_dataForSend[i].m_pData,rcvPkt->GetData(),rcvPkt->GetSize())==0)
                 {
-                    nGood +=1;
-                } else
-                {
-                    volatile uint8_t* ptr1 = m_dataForSend[i].m_pData;
-                    volatile uint8_t* ptr2 = rcvPkt->GetData();
-                    int stop = 0;
+                   nGood += 1;
+                   delete rcvPkt;
+                   m_receivedPackets.erase(j);
+                   break;
                 }
             }
         }
     }
-    QMessageBox::information(this,"Info",QString("%1 packets totally, %2 of %3 are correct").arg(m_receivedPackets.size()).arg(nGood).arg(m_nSendPktCnt));
+    QMessageBox::information(this,"Info",QString("%1 packets totally, %2 of %3 are correct").arg(totallyReceived).arg(nGood).arg(m_nSendPktCnt));
+}
+
+void Dialog::on_m_btnExportBad_clicked()
+{
+    if (m_receivedPackets.size()==0)
+    {
+        QMessageBox::information(this,"Nothing to do","There are no any packets for export");
+        return;
+    }
+    QString dir = QFileDialog::getExistingDirectory(this, tr("Select Target Directory for many files"),
+                                                 "",
+                                                 QFileDialog::ShowDirsOnly
+                                                 | QFileDialog::DontResolveSymlinks);
+    if (dir.isEmpty())
+    {
+        return;
+    }
+    QByteArray ar;
+    int n = 0;
+    for (auto j = m_receivedPackets.begin();j!=m_receivedPackets.end();++j)
+    {
+        receivedPacket* rcvPkt = *j;
+
+        if (memcmp (rcvPkt->GetData(),m_macSource,6)!=0)
+        {
+            continue;
+        }
+
+        QFile file (dir + "/" + QString::number(n++) + ".bin");
+        file.open(QIODevice::WriteOnly);
+
+        // We need invert data
+        if (ar.size()<rcvPkt->GetSize())
+        {
+            ar.resize(rcvPkt->GetSize()*2);
+        }
+        uint8_t* pData= (uint8_t*)ar.constData();
+        memcpy (pData,rcvPkt->GetData(),rcvPkt->GetSize());
+        for (int k = 0;k<rcvPkt->GetSize();k++)
+        {
+            pData [k] = ~pData[k];
+        }
+        file.write((char*)pData,rcvPkt->GetSize());
+        file.close();
+    }
 }
