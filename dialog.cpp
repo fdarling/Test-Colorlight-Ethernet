@@ -800,15 +800,20 @@ void Dialog::on_pushButton_clicked()
     // OK. Now we are ready to send data...
     m_timer.start();
 
-
-
+//#define SINGLE_MODE
+#ifdef SINGLE_MODE
+    for (int i=0;i<m_nSendPktCnt;i++)
+    {
+            pcap_sendpacket(m_hCardSource,m_dataForSend[i].m_pData,m_dataForSend[i].m_totalDataSize);
+            if (bSleepBetween)
+            {
+                Sleep (1);
+//                QThread::msleep(1);
+            }
+    }
+#else
     for (int i=0;i<m_nSendPktCnt;i+=100)
     {
-//        m_testResults[i].timeStartSend = m_timer.nsecsElapsed();
-//        m_testResults[i].sendResult = pcap_sendpacket(m_hCardSource,m_udpData[i].m_pData,m_udpData[i].m_totalDataSize);
-//        m_testResults[i].timeEndSend = m_timer.nsecsElapsed();
-//        QThread::msleep(delayTime);
-
         pcap_send_queue *squeue = pcap_sendqueue_alloc (10 * 1024 * 1024);
 
         pcap_pkthdr hdr;
@@ -825,17 +830,12 @@ void Dialog::on_pushButton_clicked()
                 hdr.ts.tv_sec += 1;
             }
             pcap_sendqueue_queue (squeue,&hdr,m_dataForSend[i+j].m_pData);
-    //        pcap_sendpacket(m_hCardSource,m_dataForSend[i].m_pData,m_dataForSend[i].m_totalDataSize);
-/*            if (bSleepBetween)
-            {
-                Sleep (1);
-    //            QThread::msleep(1);
-            }*/
         }
         pcap_sendqueue_transmit(m_hCardSource, squeue, 1);
         /* free the send queue */
         pcap_sendqueue_destroy(squeue);
     }
+#endif
 
 
     qint64 testTime =  m_timer.nsecsElapsed();
