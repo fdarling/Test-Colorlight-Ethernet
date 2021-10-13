@@ -9,6 +9,7 @@
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QFile>
+#include "Win32-Extensions.h"
 
 Dialog::Dialog(QWidget *parent)
     : QDialog(parent)
@@ -764,10 +765,9 @@ void Dialog::on_pushButton_clicked()
     }
     m_dataForSend = new udpData [m_nSendPktCnt];
 
-    // We need repeatable process that is why
-    // using same seed for tests
-    srand (1234);
+    srand (GetTickCount()/*1234*/);
 
+    qint64 totalSize = 0;
     // Create all packets for send.
     for (int i=0;i<m_nSendPktCnt;i++)
     {
@@ -775,9 +775,10 @@ void Dialog::on_pushButton_clicked()
         do
         {
             len = rand()%1024;
-//            len = 0x12;
-        } while ((len<=18)||(len%4!=2));
+            len = 1024;
+        } while ((len<=18)/*||(len%4!=2)*/);
 
+        totalSize += len;
         m_dataForSend[i].SetUserSize(len);
 
         // Fill Random data
@@ -789,22 +790,59 @@ void Dialog::on_pushButton_clicked()
         CreatePacket(sourceParams,destParams,m_dataForSend[i]);
     }
 
+    bool bSleepBetween = ui->m_cbSleepBetween->isChecked();
+    int delta = 10;
+    if (bSleepBetween)
+    {
+        delta = 220;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
     // OK. Now we are ready to send data...
     m_timer.start();
 
-    for (int i=0;i<m_nSendPktCnt;i++)
+
+
+    for (int i=0;i<m_nSendPktCnt;i+=100)
     {
 //        m_testResults[i].timeStartSend = m_timer.nsecsElapsed();
 //        m_testResults[i].sendResult = pcap_sendpacket(m_hCardSource,m_udpData[i].m_pData,m_udpData[i].m_totalDataSize);
 //        m_testResults[i].timeEndSend = m_timer.nsecsElapsed();
 //        QThread::msleep(delayTime);
 
-        pcap_sendpacket(m_hCardSource,m_dataForSend[i].m_pData,m_dataForSend[i].m_totalDataSize);
-//        QThread::msleep(1);
+        pcap_send_queue *squeue = pcap_sendqueue_alloc (10 * 1024 * 1024);
+
+        pcap_pkthdr hdr;
+        memset (&hdr,0,sizeof(hdr));
+
+        for (int j=0;((j<100) && (i+j < m_nSendPktCnt));j++)
+        {
+            hdr.caplen = m_dataForSend[i+j].m_totalDataSize;
+            hdr.len = m_dataForSend[i+j].m_totalDataSize;
+            hdr.ts.tv_usec += delta;
+            if (hdr.ts.tv_usec > 1000000)
+            {
+                hdr.ts.tv_usec %= 1000000;
+                hdr.ts.tv_sec += 1;
+            }
+            pcap_sendqueue_queue (squeue,&hdr,m_dataForSend[i+j].m_pData);
+    //        pcap_sendpacket(m_hCardSource,m_dataForSend[i].m_pData,m_dataForSend[i].m_totalDataSize);
+/*            if (bSleepBetween)
+            {
+                Sleep (1);
+    //            QThread::msleep(1);
+            }*/
+        }
+        pcap_sendqueue_transmit(m_hCardSource, squeue, 1);
+        /* free the send queue */
+        pcap_sendqueue_destroy(squeue);
     }
 
+
+    qint64 testTime =  m_timer.nsecsElapsed();
     // For finish receive process
     Sleep (1000);
+    QApplication::restoreOverrideCursor();
+
 
     if (m_rcvThread.isRunning())
     {
@@ -838,7 +876,10 @@ void Dialog::on_pushButton_clicked()
             }
         }
     }
-    QMessageBox::information(this,"Info",QString("%1 packets totally, %2 of %3 are correct").arg(totallyReceived).arg(nGood).arg(m_nSendPktCnt));
+    QString infoLine = QString::number(totalSize) + " bytes totally\n";
+    infoLine += QString ("%1.%2.%3 us\n").arg(testTime/1000000000).arg((testTime/1000000)%1000,3,10,QChar('0')).arg((testTime/1000)%1000,3,10,QChar('0'));
+    infoLine += QString("%1 packets totally, %2 of %3 are correct").arg(totallyReceived).arg(nGood).arg(m_nSendPktCnt);
+    QMessageBox::information(this,"Info",infoLine);
 }
 
 void Dialog::on_m_btnExportBad_clicked()

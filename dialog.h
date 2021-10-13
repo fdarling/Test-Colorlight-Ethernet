@@ -26,7 +26,7 @@ public:
     }
     ~receivedPacket()
     {
-        qDebug()<<"Destructor!";
+//        qDebug()<<"Destructor!";
         if (m_pData != 0)
         {
             delete[] m_pData;

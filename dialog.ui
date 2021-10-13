@@ -470,6 +470,13 @@
         </widget>
        </item>
        <item>
+        <widget class="QCheckBox" name="m_cbSleepBetween">
+         <property name="text">
+          <string>Sleep between</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QPushButton" name="m_btnExportBad">
          <property name="text">
           <string>Export Bad</string>
