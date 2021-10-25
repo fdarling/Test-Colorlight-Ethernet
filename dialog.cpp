@@ -75,7 +75,7 @@ Dialog::Dialog(QWidget *parent)
     m_nSendPktCnt = 0;
     m_dataForSend = 0;
 
-
+    m_pktId = 1234;
 }
 
 Dialog::~Dialog()
@@ -498,6 +498,11 @@ void Dialog::on_m_btnOpenEthCard_clicked()
         memcpy(m_macSource, pOidData->Data, 6);
     }
 
+    m_localIp [0] = 192;
+    m_localIp [1] = 168;
+    m_localIp [2] = 2;
+    m_localIp [3] = 5;
+
     PacketCloseAdapter(pADP);
 
     QSettings settings( "YolkaPlay.conf", QSettings::IniFormat );
@@ -528,6 +533,10 @@ void Dialog::on_m_btnCloseEthCard_clicked()
 
 void Dialog::on_m_btnSendPkt_clicked()
 {
+
+    m_arpThread.m_pDialog = this;
+    m_arpThread.start(QThread::HighestPriority);
+
     addrAndPort sourceParams;
     sourceParams.mac = m_macSource;
     sourceParams.ip = inet_addr("10.0.0.2");
@@ -540,6 +549,53 @@ void Dialog::on_m_btnSendPkt_clicked()
     destParams.ip = inet_addr("10.0.0.3");
     destParams.port = 12345;
 
+#define jewjq
+#ifdef jewjq
+/*    for (int i=0;i<3;i++)
+    {
+        static const uint8_t arppkt[] ={
+            0x02,0x00,0x00,0x00,0x00,0x00,0x00,0xe0,0x4c,0x68,0x26,0x18,
+            0x08,0x06,0x00,0x01,0x08,0x00,0x06,0x04,0x00,0x01,0x00,0xe0,
+            0x4c,0x68,0x26,0x18,0xc0,0xa8,0x02,0x05,0x02,0x00,0x00,0x00,
+            0x00,0x00,0xc0,0xa8,0x02,0x80
+        };
+        udpData arpData;
+        arpData.SetUserSize(sizeof(arppkt)-42);
+        memcpy (arpData.m_pData,arppkt,sizeof(arppkt));
+        pcap_sendpacket(m_hCardSource,arpData.m_pData,arpData.m_totalDataSize);*/
+
+    static const uint8_t pkt[] ={
+        0x02,0x00,0x00,0x00,0x00,0x00,0x00,0xe0,0x4c,0x68,0x26,
+        0x18,0x08,0x00,0x45,0x00,0x00,0x31,0x2a,0x5d,0x00,0x00,
+        0x80,0x11,0x00,0x00,0xc0,0xa8,0x02,0x05,0xc0,0xa8,0x02,
+        0x80,0xd8,0xdd,0x04,0xd2,0x00,0x1d,0x86,0x04,0x74,0x65,
+        0x73,0x74,0x74,0x65,0x73,0x74,0x74,0x65,0x73,0x74,0x74,
+        0x65,0x73,0x74,0x74,0x65,0x73,0x74,0x0a
+    };
+    udpData udpData;
+    udpData.SetUserSize(sizeof(pkt)-42);
+    memcpy (udpData.m_pData,pkt,sizeof(pkt));
+    udpData.m_pData[0x12] = (uint8_t) (m_pktId / 0x100);
+    udpData.m_pData[0x13] = (uint8_t) m_pktId;
+    m_pktId += 1;
+
+    unsigned short UDPChecksum = CalculateUDPChecksum(udpData);
+    memcpy((void*)(udpData.m_pData+40),(void*)&UDPChecksum,2);
+
+    unsigned short IPChecksum = htons(CalculateIPChecksum(udpData/*,TotalLen,0x1337,source.ip,destination.ip*/));
+    memcpy((void*)(udpData.m_pData+24),(void*)&IPChecksum,2);
+
+    pcap_sendpacket(m_hCardSource,udpData.m_pData,udpData.m_totalDataSize);
+
+    Sleep (500);
+    if (m_rcvThread.isRunning())
+    {
+        m_rcvThread.requestInterruption();
+    }
+
+
+//    }
+#else
     static const int dataSize = 0x22;
     udpData udpData;
     udpData.SetUserSize(dataSize);
@@ -547,11 +603,10 @@ void Dialog::on_m_btnSendPkt_clicked()
     {
         udpData.m_pUserData[i] = (uint8_t)(i + ((~i)<<4));
     }
-
     // Well. Data is filled, now we can add extra information
     CreatePacket(sourceParams,destParams,udpData);
-
     pcap_sendpacket(m_hCardSource,udpData.m_pData,udpData.m_totalDataSize);
+#endif
 
 
 }
@@ -712,6 +767,68 @@ void CReceiverThread::run()
                 volatile int stop = 0;
                 (void) stop;
             }
+            receivedPacket* pPkt = new receivedPacket(header->len);
+            m_pDialog->m_receivedPackets.push_back(pPkt);
+            pPkt->SetTimeStamp(m_pDialog->m_timer.nsecsElapsed());
+            memcpy (pPkt->GetHdrPtr(),header,sizeof(pcap_pkthdr));
+            memcpy (pPkt->GetData(),pData,header->caplen);
+        }
+    }
+}
+void CARPThread::run()
+{
+    while (!isInterruptionRequested())
+    {
+        pcap_pkthdr *header;
+        const u_char * pData;
+        int res = pcap_next_ex(m_pDialog->m_hCardSource, &header, &pData);
+        if (res == 1)
+        {
+            uint32_t reqType = pData [12] * 0x100 + pData [13];
+            uint32_t opCode = pData [20] * 0x100 + pData [21];
+            // This is an ARP packet
+            if ((reqType == 0x806) && (opCode == 0x0001))
+            {
+                Dialog::udpData udpData;
+                // Header Only
+                udpData.SetUserSize(0);
+                memset (udpData.m_pData,0,udpData.m_totalDataSize);
+                // Copy destinatin MAC address
+                memcpy (udpData.m_pData,pData+6,6);
+                // Copy Source MAC address
+                memcpy (udpData.m_pData+6,m_pDialog->m_macSource,6);
+
+                // This is an ARP Packet
+                udpData.m_pData [12] = 0x08;
+                udpData.m_pData [13] = 0x06;
+
+                // Hardware Type - Ethernet
+                udpData.m_pData [14] = 0x00;
+                udpData.m_pData [15] = 0x01;
+
+                // Protocol is IPv4
+                udpData.m_pData [16] = 0x08;
+                udpData.m_pData [17] = 0x00;
+
+                // Hardware Size
+                udpData.m_pData [18] = 0x06;
+
+                // Protocol Size
+                udpData.m_pData [19] = 0x04;
+
+                // This is an Reply!
+                udpData.m_pData [20] = 0x00;
+                udpData.m_pData [21] = 0x02;
+
+                memcpy (udpData.m_pData+22,m_pDialog->m_macSource,6);
+                memcpy (udpData.m_pData+28,m_pDialog->m_localIp,4);
+                memcpy (udpData.m_pData+32,pData+22,6);
+                memcpy (udpData.m_pData+38,pData+28,4);
+
+                pcap_sendpacket(m_pDialog->m_hCardSource,udpData.m_pData,udpData.m_totalDataSize);
+
+            }
+
             receivedPacket* pPkt = new receivedPacket(header->len);
             m_pDialog->m_receivedPackets.push_back(pPkt);
             pPkt->SetTimeStamp(m_pDialog->m_timer.nsecsElapsed());
@@ -925,4 +1042,49 @@ void Dialog::on_m_btnExportBad_clicked()
         file.write((char*)pData,rcvPkt->GetSize());
         file.close();
     }
+}
+
+void Dialog::on_m_btnCrewateTestPkt_clicked()
+{
+    udpData data;
+    data.SetUserSize(64);
+    for (int i=0;i<data.GetUserSize();i++)
+    {
+        data.m_pUserData[i] = (uint8_t)i;
+    }
+    addrAndPort sourceParams;
+    sourceParams.mac = m_macSource;
+    sourceParams.ip = inet_addr("10.0.0.2");
+    sourceParams.port = 12345;
+
+    static const uint8_t fakeDestMac [6]={0x01,0x02,0x03,0x04,0x05,0x06};
+
+    addrAndPort destParams;
+    destParams.mac = (uint8_t*) fakeDestMac;
+    destParams.ip = inet_addr("10.0.0.3");
+    destParams.port = 12345;
+
+    static const int dataSize = 0x22;
+    udpData udpData;
+    udpData.SetUserSize(dataSize);
+    for (int i=0;i<dataSize;i++)
+    {
+        udpData.m_pUserData[i] = (uint8_t)(i + ((~i)<<4));
+    }
+
+    // Well. Data is filled, now we can add extra information
+    CreatePacket(sourceParams,destParams,data);
+
+    QFile file ("file1.txt");
+    file.open(QIODevice::WriteOnly);
+
+    for (int i=0;i<data.m_totalDataSize;i++)
+    {
+        char txt [16];
+        sprintf (txt,"%02X\r\n",data.m_pData[i]);
+        file.write(txt,strlen(txt));
+    }
+
+    file.close();
+
 }

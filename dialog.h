@@ -18,6 +18,7 @@ protected:
     uint8_t* m_pData;
     pcap_pkthdr m_hdr;
     qint64 m_timeStamp;
+
 public:
     receivedPacket(int len)
     {
@@ -69,6 +70,16 @@ protected:
 
 };
 
+class CARPThread : public QThread
+{
+public:
+    Dialog* m_pDialog;
+    // QThread interface
+protected:
+    void run();
+
+};
+
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class Dialog; }
@@ -83,23 +94,8 @@ public:
     ~Dialog();
     pcap_t* m_hCardSource;
     QElapsedTimer m_timer;
-
-private:
-    Ui::Dialog *ui;
-
-protected:
-    virtual uint32_t CalculateCRC(uint8_t* pData,int size);
-
     uint8_t m_macSource[6];
-    uint8_t m_macDestination[6];
-
-    struct addrAndPort
-    {
-        uint8_t* mac;
-        uint32_t ip;
-        uint32_t port;
-    };
-
+    uint8_t m_localIp [4];
     struct udpData
     {
         uint8_t* m_pData;
@@ -121,7 +117,7 @@ protected:
         }
         void SetUserSize (int userSizeInBytes)
         {
-            if (m_userSize == userSizeInBytes)
+            if (m_totalDataSize == userSizeInBytes + 42)
             {
                 return;
             }
@@ -141,6 +137,23 @@ protected:
             return m_pData[index];
         }
         inline int GetUserSize(){return m_userSize;}
+    };
+
+
+private:
+    Ui::Dialog *ui;
+
+protected:
+    virtual uint32_t CalculateCRC(uint8_t* pData,int size);
+
+    uint8_t m_macDestination[6];
+    int m_pktId;
+
+    struct addrAndPort
+    {
+        uint8_t* mac;
+        uint32_t ip;
+        uint32_t port;
     };
 
     int m_nSendPktCnt;
@@ -191,6 +204,7 @@ protected:
     } m_rcvBehaviour;
 
     CReceiverThread m_rcvThread;
+    CARPThread m_arpThread;
 
 public:
     std::list <receivedPacket*> m_receivedPackets;
@@ -219,5 +233,6 @@ private slots:
     void on_m_btnSendPkt_clicked();
     void on_pushButton_clicked();
     void on_m_btnExportBad_clicked();
+    void on_m_btnCrewateTestPkt_clicked();
 };
 #endif // DIALOG_H
