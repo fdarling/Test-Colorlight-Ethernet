@@ -565,9 +565,10 @@ void Dialog::on_m_btnSendPkt_clicked()
         pcap_sendpacket(m_hCardSource,arpData.m_pData,arpData.m_totalDataSize);*/
 
     static const uint8_t pkt[] ={
-        0x02,0x00,0x00,0x00,0x00,0x00,0x00,0xe0,0x4c,0x68,0x26,
-        0x18,0x08,0x00,0x45,0x00,0x00,0x31,0x2a,0x5d,0x00,0x00,
-        0x80,0x11,0x00,0x00,0xc0,0xa8,0x02,0x05,0xc0,0xa8,0x02,
+        0x02,0x00,0x00,0x00,0x00,0x00,0x00,0xe0,
+        0x4c,0x68,0x26,0x18,0x08,0x00,0x45,0x00,
+        0x00,0x31,0x2a,0x5d,0x00,0x00,0x80,0x11,
+        0x00,0x00,0xc0,0xa8,0x02,0x05,0xc0,0xa8,0x02,
         0x80,0xd8,0xdd,0x04,0xd2,0x00,0x1d,0x86,0x04,0x74,0x65,
         0x73,0x74,0x74,0x65,0x73,0x74,0x74,0x65,0x73,0x74,0x74,
         0x65,0x73,0x74,0x74,0x65,0x73,0x74,0x0a
@@ -584,6 +585,8 @@ void Dialog::on_m_btnSendPkt_clicked()
 
     unsigned short IPChecksum = htons(CalculateIPChecksum(udpData/*,TotalLen,0x1337,source.ip,destination.ip*/));
     memcpy((void*)(udpData.m_pData+24),(void*)&IPChecksum,2);
+
+    udpData.SaveToFile("udpPacket.txt");
 
     pcap_sendpacket(m_hCardSource,udpData.m_pData,udpData.m_totalDataSize);
 
@@ -825,6 +828,8 @@ void CARPThread::run()
                 memcpy (udpData.m_pData+32,pData+22,6);
                 memcpy (udpData.m_pData+38,pData+28,4);
 
+                udpData.SaveToFile("arpAnswer.txt");
+
                 pcap_sendpacket(m_pDialog->m_hCardSource,udpData.m_pData,udpData.m_totalDataSize);
 
             }
@@ -860,13 +865,13 @@ void Dialog::on_pushButton_clicked()
 
     addrAndPort sourceParams;
     sourceParams.mac = m_macSource;
-    sourceParams.ip = inet_addr("10.0.0.2");
-    sourceParams.port = 12345;
+    sourceParams.ip = inet_addr("192.168.2.5");
+    sourceParams.port = 1234;
 
     addrAndPort destParams;
     destParams.mac = m_macDestination;
-    destParams.ip = inet_addr("10.0.0.3");
-    destParams.port = 12345;
+    destParams.ip = inet_addr("192.168.2.128");
+    destParams.port = 1234;
 
 
     // Create Packets for send
@@ -974,16 +979,30 @@ void Dialog::on_pushButton_clicked()
     int totallyReceived = m_receivedPackets.size();
     for (int i=0;i<m_nSendPktCnt;i++)
     {
-        for (int j=0;j<m_dataForSend[i].m_totalDataSize;j++)
+        // When we are testing MAC layer, we are inversing data for
+        // be sure that this is really processed information
+        // But in UDP layer it requires deep pipelining that is why
+        // we will use original data
+        int dataOffset = 0;
+        if (ui->m_cbInverse->isChecked())
         {
-            m_dataForSend[i].m_pData[j] = ~m_dataForSend[i].m_pData[j];
+            for (int j=0;j<m_dataForSend[i].m_totalDataSize;j++)
+            {
+                m_dataForSend[i].m_pData[j] = ~m_dataForSend[i].m_pData[j];
+            }
+        } else
+        {
+            dataOffset = 42;
         }
         for (auto j = m_receivedPackets.begin();j!=m_receivedPackets.end();++j)
         {
             receivedPacket* rcvPkt = *j;
             if (m_dataForSend[i].m_totalDataSize == rcvPkt->GetSize())
             {
-                if (memcmp(m_dataForSend[i].m_pData,rcvPkt->GetData(),rcvPkt->GetSize())==0)
+                volatile uint8_t* pSrc = m_dataForSend[i].m_pData+dataOffset;
+                volatile uint8_t* pCmp = rcvPkt->GetData()+dataOffset;
+
+                if (memcmp(m_dataForSend[i].m_pData+dataOffset,rcvPkt->GetData()+dataOffset,rcvPkt->GetSize()-dataOffset)==0)
                 {
                    nGood += 1;
                    delete rcvPkt;

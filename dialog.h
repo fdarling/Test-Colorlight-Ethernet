@@ -8,6 +8,7 @@
 #include "Packet32.h"
 #include <QThread>
 #include <QDebug>
+#include <QFile>
 
 class Dialog;
 
@@ -135,6 +136,29 @@ public:
         uint8_t& operator[](int index)
         {
             return m_pData[index];
+        }
+        void SaveToFile (const char* fileName)
+        {
+            QFile file (fileName);
+            if (!file.open(QIODevice::WriteOnly))
+            {
+                return;
+            }
+            int len = 0;
+            while (len < m_totalDataSize)
+            {
+                char txt [16];
+                sprintf (txt,"%02X\r\n",m_pData[len]);
+                file.write(txt,4);
+                len += 1;
+            }
+            // PAD
+            while (len < 60)
+            {
+                file.write("00\r\n",4);
+                len += 1;
+            }
+            file.close();
         }
         inline int GetUserSize(){return m_userSize;}
     };

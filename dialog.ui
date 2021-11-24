@@ -470,6 +470,16 @@
         </widget>
        </item>
        <item>
+        <widget class="QCheckBox" name="m_cbInverse">
+         <property name="text">
+          <string>Inverse</string>
+         </property>
+         <property name="checked">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QCheckBox" name="m_cbSleepBetween">
          <property name="text">
           <string>Sleep between</string>
