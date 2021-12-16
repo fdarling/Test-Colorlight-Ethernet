@@ -993,6 +993,10 @@ void Dialog::on_pushButton_clicked()
         } else
         {
             dataOffset = 42;
+            for (int j=0;j<m_dataForSend[i].m_totalDataSize;j++)
+            {
+                m_dataForSend[i].m_pData[j] = m_dataForSend[i].m_pData[j]+1;
+            }
         }
         for (auto j = m_receivedPackets.begin();j!=m_receivedPackets.end();++j)
         {
@@ -1012,8 +1016,11 @@ void Dialog::on_pushButton_clicked()
             }
         }
     }
+    double speed = (double)totalSize/(double)testTime;
+    speed *= 1000000000.;
     QString infoLine = QString::number(totalSize) + " bytes totally\n";
-    infoLine += QString ("%1.%2.%3 us\n").arg(testTime/1000000000).arg((testTime/1000000)%1000,3,10,QChar('0')).arg((testTime/1000)%1000,3,10,QChar('0'));
+    infoLine += QString ("%1'%2'%3 us\n").arg(testTime/1000000000).arg((testTime/1000000)%1000,3,10,QChar('0')).arg((testTime/1000)%1000,3,10,QChar('0'));
+    infoLine += QString::number((int)speed) + " bytes per seconds\n";
     infoLine += QString("%1 packets totally, %2 of %3 are correct").arg(totallyReceived).arg(nGood).arg(m_nSendPktCnt);
     QMessageBox::information(this,"Info",infoLine);
 }
