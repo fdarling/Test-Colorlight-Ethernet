@@ -1072,6 +1072,20 @@ void Dialog::on_m_btnExportBad_clicked()
 
 void Dialog::on_m_btnCrewateTestPkt_clicked()
 {
+/*    uint8_t dataC [64];
+    memset (dataC,0x12,sizeof(dataC));
+    uint32_t crc = CalculateCRC(dataC,32);
+
+
+    dataC[32] = ~(uint8_t)(crc/0x1);
+    dataC[33] = ~(uint8_t)(crc/0x100);
+    dataC[34] = ~(uint8_t)(crc/0x10000);
+    dataC [35] = ~(uint8_t)(crc/0x1000000);
+    uint32_t crc2 = CalculateCRC(dataC,36);
+
+    int stop = 0;*/
+
+
     udpData data;
     data.SetUserSize(64);
     for (int i=0;i<data.GetUserSize();i++)
