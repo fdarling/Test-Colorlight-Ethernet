@@ -1128,3 +1128,57 @@ void Dialog::on_m_btnCrewateTestPkt_clicked()
     file.close();
 
 }
+
+void Dialog::on_m_btnReadEeprom_clicked()
+{
+    m_arpThread.m_pDialog = this;
+    m_arpThread.start(QThread::HighestPriority);
+
+    addrAndPort sourceParams;
+    sourceParams.mac = m_macSource;
+    sourceParams.ip = inet_addr("10.0.0.2");
+    sourceParams.port = 12345;
+
+    static const uint8_t fakeDestMac [6]={0x01,0x02,0x03,0x04,0x05,0x06};
+
+    addrAndPort destParams;
+    destParams.mac = (uint8_t*) fakeDestMac;
+    destParams.ip = inet_addr("10.0.0.3");
+    destParams.port = 12345;
+
+    static const uint8_t pkt[] ={
+        0x02,0x00,0x00,0x00,0x00,0x00,0x00,0xe0,
+        0x4c,0x68,0x26,0x18,0x08,0x00,0x45,0x00,
+        0x00,0x31,0x2a,0x5d,0x00,0x00,0x80,0x11,
+        0x00,0x00,0xc0,0xa8,0x02,0x05,0xc0,0xa8,0x02,
+        0x80,0xd8,0xdd,0xEE,0xE0,0x00,0x1d,0x86,0x04,0x74,0x65,
+        0x73,0x74,0x74,0x65,0x73,0x74,0x74,0x65,0x73,0x74,0x74,
+        0x65,0x73,0x74,0x74,0x65,0x73,0x74,0x0a
+    };
+    udpData udpData;
+    udpData.SetUserSize(sizeof(pkt)-42);
+    memcpy (udpData.m_pData,pkt,sizeof(pkt));
+    udpData.m_pData[0x12] = (uint8_t) (m_pktId / 0x100);
+    udpData.m_pData[0x13] = (uint8_t) m_pktId;
+    m_pktId += 1;
+
+    unsigned short UDPChecksum = CalculateUDPChecksum(udpData);
+    memcpy((void*)(udpData.m_pData+40),(void*)&UDPChecksum,2);
+
+    unsigned short IPChecksum = htons(CalculateIPChecksum(udpData/*,TotalLen,0x1337,source.ip,destination.ip*/));
+    memcpy((void*)(udpData.m_pData+24),(void*)&IPChecksum,2);
+
+    udpData.SaveToFile("udpPacket.txt");
+
+    pcap_sendpacket(m_hCardSource,udpData.m_pData,udpData.m_totalDataSize);
+
+    Sleep (500);
+    if (m_rcvThread.isRunning())
+    {
+        m_rcvThread.requestInterruption();
+    }
+
+
+//    }
+
+}

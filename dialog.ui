@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1231</width>
-    <height>435</height>
+    <height>476</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -497,6 +497,13 @@
         <widget class="QPushButton" name="m_btnCrewateTestPkt">
          <property name="text">
           <string>Create Test Pkt</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="m_btnReadEeprom">
+         <property name="text">
+          <string>Read EEPROM</string>
          </property>
         </widget>
        </item>
